@@ -1,0 +1,59 @@
+# Raw downloaded PDFs
+*.pdf
+
+# Extracted text corpora
+*.txt
+!README.md
+!SKILL.md
+
+# Reorganized / organized state data trees
+# State-level output directories follow: <state>/<court>/<year>/<case>/opinion.txt
+# Exclude top-level state directories (adjust patterns per actual state names)
+# Example patterns based on states referenced in docs:
+florida/
+georgia/
+iowa/
+colorado/
+montana/
+louisiana/
+maine/
+maryland/
+massachusetts/
+
+# California organized output (handled by reorganize_data.py)
+california/
+
+# verify-data snapshots (large authoritative comparison data)
+verify-data/
+
+# Large archives and zips
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.gz
+*.7z
+*.rar
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment / editor
+.env
+.venv
+venv/
+env/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
