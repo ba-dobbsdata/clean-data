@@ -277,3 +277,124 @@ Create `verify_pipeline.py` that:
 | SC CSV column names are misspelled | Map `Donwload PDF path` -> pdf path, `descpiction` -> description |
 | MD filed_date has annotations | Regex-extract just the date portion |
 | LA has duplicate rows | Deduplicate by case key before organizing |
+
+---
+
+## PROGRESS LOG
+
+### Session: 2026-03-26
+
+#### Work Completed
+
+**1. Phase 1 (CSV Inspection): COMPLETED** -- documented above in original plan.
+
+**2. Phase 2 (Update Existing States): ~30% COMPLETE**
+
+- `reorganize_states.py` was refactored to a split-module architecture:
+  - Main file now contains shared infrastructure (`StateConfig`, `CaseEntry`, helpers, CLI)
+  - Path roots updated to correct locations:
+    - `RAW_ROOT` = `LegalAI-Scraper/<state>/` (CSVs + PDFs)
+    - `TXT_ROOT` = `LegalAI-Scraper/txt_output/<state>/` (converted txt)
+    - `OUTPUT_ROOT` = `clean-data/<state>/` (organized output)
+  - Added `relative_str()` helper function
+  - Imports `handlers_existing.py` and `handlers_new.py` (not yet created)
+
+**3. Critical Data Path Findings (CORRECTS ORIGINAL PLAN)**
+
+Re-verified actual txt file counts on disk:
+
+| State | Original Claim | Actual txt Files | Status Change |
+|---|---|---|---|
+| Louisiana | 0 txt | **8,807 txt** | Ready to organize |
+| Maine | 0 txt | **1,135 txt** | Ready to organize |
+| Maryland | 0 txt | **9,842 txt** | Ready to organize |
+| Massachusetts | 0 txt | **19,337 txt** | Ready to organize |
+| Montana | 0 txt | **0 txt** | Still needs extraction |
+| Vermont | 0 txt | **0 txt (no dir)** | Still needs extraction |
+
+**Only Montana and Vermont actually need PDF-to-text extraction.** The other 4 states already have txt files.
+
+**4. txt_output Directory Pattern Discovery**
+
+Critical finding: **Inconsistent singular vs plural naming** in `txt_output/`:
+
+| Pattern | States |
+|---|---|
+| `txt_output/<state>/download/` (SINGULAR) | Colorado, Florida, Georgia, New Jersey |
+| `txt_output/<state>/downloads/` (PLURAL) | Iowa, Nevada, Rhode Island, South Carolina, Louisiana, Maine, Maryland, Massachusetts |
+
+States with singular `download/` also have an EMPTY `downloads/` sibling directory. Scripts must check the correct path.
+
+**5. Verified txt File Counts for All States**
+
+| State | txt Files | txt Path Pattern |
+|---|---|---|
+| Colorado | 2,019 | `txt_output/colorado/download/<court>/pdf/*.txt` |
+| Florida | 2,012 | `txt_output/florida/download/pdf/*.txt` |
+| Georgia | 2,564 | `txt_output/georgia/download/<year>/<month>/*.txt` |
+| Iowa | 9,493 | `txt_output/iowa/downloads/<court>/<year>/<case>/*.txt` |
+| Louisiana | 8,807 | `txt_output/louisiana/downloads/PDF/*.txt` |
+| Maine | 1,135 | `txt_output/maine/downloads/PDF/*.txt` |
+| Maryland | 9,842 | `txt_output/maryland/downloads/PDF/*.txt` |
+| Massachusetts | 19,337 | `txt_output/massachusetts/downloads/PDF/*.txt` |
+| Montana | 0 | N/A -- needs extraction |
+| Nevada | 5,022 | `txt_output/nevada/downloads/supreme_court/<type>/<year>/<case>/*.txt` |
+| New Hampshire | 5,216 | `txt_output/new_hampshire/downloads/supreme_court/<category>/<year>/<case>/*.txt` |
+| New Jersey | 20,077 | `txt_output/new_jersey/download/<court>/file/*.txt` |
+| New Mexico | 30,819 | `txt_output/new_mexico/downloads/<court>/PDF/*.txt` |
+| North Carolina | 36,150 | `txt_output/north_carolina/download/appellate_court_opinions/file/*.txt` |
+| Pennsylvania | 482 | `txt_output/pennsylvania/downloads/*.txt` (flat) |
+| Rhode Island | 9,139 | `txt_output/rhode_island/downloads/supreme_court/<year>/<case>/*.txt` |
+| South Carolina | 20,129 | `txt_output/south_carolina/downloads/<court>/PDF/*.txt` |
+| Vermont | 0 | N/A -- needs extraction |
+
+**6. CSV Column Headers Verified for All New States**
+
+| State | Merged CSV Path | Key Columns |
+|---|---|---|
+| Nevada | `downloads/CSV/case.csv` | `source_type`, `case_number`, `opinion_date`, `order_date`, `pdf_local_path` |
+| New Hampshire | `downloads/supreme_court/CSV/case.csv` | `case_number`, `court`, `case_date`, `pdf_local_path` |
+| New Jersey | `downloads/CSV/case.csv` | `source_court`, `no`, `date`, `pdf_full_path` |
+| New Mexico | `downloads/CSV/case.csv` | `item_id`, `publication_date`, `court`, `pdf_local_path` |
+| North Carolina | `downloads/CSV/north_carolina_opinions_merged.csv` | `date`, `court`, `pdf_url`, `zip_url` |
+| Pennsylvania | `downloads/CSV/all_courts.csv` | `title`, `date`, `source`, `pdf_file` |
+| Rhode Island | `downloads/supreme_court/CSV/supreme_court_cases.csv` | `case_number`, `case_date`, `pdf_local_path` |
+| South Carolina | `downloads/CSV/case.csv` | `Date`, `Court`, `Type`, `case_no`, `Donwload PDF path` |
+| Vermont | `downloads/CSV/case.csv` | `Case Number`, `Date`, `Court`, `Opinion folder (PDF full path)` |
+
+#### Files Modified
+
+| File | Change |
+|---|---|
+| `reorganize_states.py` | Refactored to split-module architecture, updated path roots, added `relative_str()` |
+
+#### Files To Be Created (Next Session)
+
+| File | Purpose |
+|---|---|
+| `handlers_existing.py` | Organizer functions for 9 existing states (CO, FL, GA, IA, LA, ME, MD, MA, MT) |
+| `handlers_new.py` | Organizer functions for 9 new states (NV, NH, NJ, NM, NC, PA, RI, SC, VT) |
+| `verify_pipeline.py` | 3-level verification script |
+
+#### Updated Batch Plan
+
+Given the corrected txt availability:
+
+| Batch | States | Status |
+|---|---|---|
+| A | Colorado, Iowa, Nevada, Rhode Island | txt ready -- build handlers |
+| B | Florida, Georgia | txt ready -- build handlers |
+| C | New Jersey, South Carolina | txt ready -- build handlers |
+| D | New Mexico, North Carolina | txt ready -- build handlers |
+| E | New Hampshire | txt ready -- build handlers |
+| F | Pennsylvania | txt ready (partial) -- build handlers |
+| G | Louisiana, Maine, Maryland, Massachusetts | **txt NOW READY** -- build handlers |
+| H (Extract) | Montana, Vermont | Still need PDF extraction first |
+
+#### Next Steps
+
+1. Create `handlers_existing.py` with 9 organizer functions ported from committed version
+2. Create `handlers_new.py` with 9 new organizer functions
+3. Create `verify_pipeline.py` for 3-level verification
+4. Test Batch A (CO, IA, NV, RI) first
+5. Run remaining batches progressively
