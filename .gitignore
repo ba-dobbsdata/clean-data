@@ -5,6 +5,16 @@
 *.txt
 !README.md
 !SKILL.md
+south_carolina/
+nevada/
+new_jersey/
+new_hampshire/
+new_mexico/
+north_carolina/
+rhode_island/
+south_dakota/
+pennsylvania/
+vermount/
 
 # Reorganized / organized state data trees
 # State-level output directories follow: <state>/<court>/<year>/<case>/opinion.txt

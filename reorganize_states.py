@@ -30,6 +30,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent           # LegalAI-Scraper/
 RAW_ROOT = PROJECT_ROOT                            # CSVs + PDFs live here
 TXT_ROOT = PROJECT_ROOT / "txt_output"             # converted .txt files
 OUTPUT_ROOT = SCRIPT_DIR                           # clean-data/ (organised output)
+PHASE2_ROOT = PROJECT_ROOT.parent / "Source Code Legal AI"  # Phase 2 raw data
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +81,15 @@ def make_state_config(state_key: str) -> StateConfig:
     )
 
 
+def make_phase2_config(state_key: str, source_dir_name: str) -> StateConfig:
+    """Create config for Phase 2 states (Source Code Legal AI)."""
+    return StateConfig(
+        raw_root=PHASE2_ROOT / source_dir_name,
+        txt_root=TXT_ROOT / state_key,
+        output_root=OUTPUT_ROOT / state_key,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -98,7 +108,16 @@ def sanitize_case_component(value: str) -> str:
 
 def ensure_clean_dir(path: Path) -> None:
     if path.exists():
-        shutil.rmtree(path)
+        # Remove contents but keep the directory if rmtree fails (WSL permission issue)
+        try:
+            shutil.rmtree(path)
+        except PermissionError:
+            # Try to remove contents individually instead
+            for child in path.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
     path.mkdir(parents=True, exist_ok=True)
 
 
@@ -116,13 +135,15 @@ def year_from_value(value: str, formats: list[str]) -> str:
     parsed = parse_date(value, formats)
     if parsed:
         return parsed.strftime("%Y")
-    match = re.search(r"(19|20)\d{2}", value or "")
-    return match.group(0) if match else ""
+    match = re.search(r"(?:19|20)\d{2}", value or "")
+    return match.group(0) if match else "unknown_year"
 
 
 def make_unique_case_folder(base_name: str, opinion_date: str, used: set[str]) -> str:
-    if base_name not in used:
-        used.add(base_name)
+    # Use lowercase for comparison to avoid collisions on case-insensitive filesystems (NTFS)
+    check_name = base_name.lower()
+    if check_name not in used:
+        used.add(check_name)
         return base_name
 
     suffix = ""
@@ -132,15 +153,15 @@ def make_unique_case_folder(base_name: str, opinion_date: str, used: set[str]) -
         suffix = parsed.strftime("%Y_%m_%d")
 
     candidate = f"{base_name}__{suffix}" if suffix else f"{base_name}__2"
-    if candidate not in used:
-        used.add(candidate)
+    if candidate.lower() not in used:
+        used.add(candidate.lower())
         return candidate
 
     index = 2
     while True:
         candidate = f"{base_name}__{suffix}_{index}" if suffix else f"{base_name}__{index}"
-        if candidate not in used:
-            used.add(candidate)
+        if candidate.lower() not in used:
+            used.add(candidate.lower())
             return candidate
         index += 1
 
@@ -203,7 +224,9 @@ def text_path_from_flat_index(row: dict[str, str],
                               text_index: dict[str, Path]) -> Path | None:
     pdf_local_path = row.get("pdf_local_path", "")
     if pdf_local_path:
-        text_path = text_index.get(Path(pdf_local_path).stem.lower())
+        # Normalize backslashes for cross-platform compatibility
+        normalized = pdf_local_path.replace("\\", "/")
+        text_path = text_index.get(Path(normalized).stem.lower())
         if text_path:
             return text_path
 
@@ -220,7 +243,8 @@ def text_path_from_flat_index(row: dict[str, str],
 def path_stem_from_row(row: dict[str, str]) -> str:
     pdf_local_path = row.get("pdf_local_path", "")
     if pdf_local_path:
-        return Path(pdf_local_path).stem.lower()
+        # Normalize backslashes for cross-platform compatibility
+        return Path(pdf_local_path.replace("\\", "/")).stem.lower()
 
     for key in ("pdf_url", "case_pdf_url", "read_full_url"):
         value = row.get(key, "")
@@ -267,11 +291,23 @@ def _build_reorganizers() -> dict[str, ReorgFunc]:
     merged = {}
     merged.update(existing)
     merged.update(new)
+    try:
+        from handlers_phase2 import REORGANIZERS as phase2
+        merged.update(phase2)
+    except ImportError:
+        pass
     return merged
 
 
 def main() -> None:
     reorganizers = _build_reorganizers()
+
+    # Phase 2 states need different source dirs
+    try:
+        from handlers_phase2 import PHASE2_SOURCE_DIRS
+    except ImportError:
+        PHASE2_SOURCE_DIRS = {}
+
     parser = argparse.ArgumentParser(
         description="Normalize state court opinion datasets.",
     )
@@ -283,7 +319,10 @@ def main() -> None:
 
     states = args.states or sorted(reorganizers)
     for state in states:
-        cfg = make_state_config(state)
+        if state in PHASE2_SOURCE_DIRS:
+            cfg = make_phase2_config(state, PHASE2_SOURCE_DIRS[state])
+        else:
+            cfg = make_state_config(state)
         counts = reorganizers[state](cfg)
         summary = ", ".join(f"{key}={value}" for key, value in counts.items())
         print(f"{state}: {summary}")

@@ -391,10 +391,120 @@ Given the corrected txt availability:
 | G | Louisiana, Maine, Maryland, Massachusetts | **txt NOW READY** -- build handlers |
 | H (Extract) | Montana, Vermont | Still need PDF extraction first |
 
-#### Next Steps
+#### Session 3 Progress (2026-03-29)
 
-1. Create `handlers_existing.py` with 9 organizer functions ported from committed version
-2. Create `handlers_new.py` with 9 new organizer functions
-3. Create `verify_pipeline.py` for 3-level verification
-4. Test Batch A (CO, IA, NV, RI) first
-5. Run remaining batches progressively
+**All 16 states organized successfully (176,098 total cases).**
+
+Bugs fixed this session:
+1. **Iowa** – `replace("/", "\\")` broke paths on Linux; changed to `replace("\\", "/")`
+2. **Rhode Island** – `pdf_local_path` had absolute Windows paths; extract relative from `downloads/`
+3. **New Hampshire** – same absolute Windows path issue; same fix
+4. **New Jersey** – txt files named `{case_no}_{pdf_stem}.txt`; construct composite lookup key
+5. **New Mexico** – txt files named `date_itemid_title.txt`; extract item_id from filename; court names in CSV were full names; updated COURT_MAP
+6. **North Carolina** – pdf_id is in URL query param `?pdf=12345`, not path; extract via `parse_qs`; txt files named `title_pdfid.txt`; index by numeric suffix
+7. **Pennsylvania** – backslashes in `pdf_file` not treated as path separators on Linux; normalize with `.replace("\\", "/")`
+8. **Maryland/Massachusetts/Louisiana** – `text_path_from_flat_index()` shared function had same backslash issue; fixed centrally
+
+Final case counts (end of session 2):
+
+| State | CSV Rows | Cases Organized | Skipped | Courts |
+|---|---|---|---|---|
+| Colorado | 2,019 | 1,755 | 264 | 2 |
+| Florida | 32,357 | 2,852 | 29,505 | 8 |
+| Georgia | 2,803 | 2,779 | 24 | 1 |
+| Iowa | 9,495 | 9,493 | 2 | 2 |
+| Louisiana | 5,218 | 4,875 | 343 | 1 |
+| Maine | 1,139 | 1,135 | 4 | 1 |
+| Maryland | 9,849 | 9,841 | 8 | 2 |
+| Massachusetts | 19,389 | 19,337 | 52 | 1 |
+| Nevada | 5,066 | 5,022 | 44 | 2 |
+| New Hampshire | 5,290 | 5,206 | 84 | 4 |
+| New Jersey | 20,261 | 17,546 | 2,715 | 3 |
+| New Mexico | 33,207 | 30,810 | 2,397 | 2 |
+| North Carolina | 37,877 | 34,656 | 3,221 | 2 |
+| Pennsylvania | 1,000 | 537 | 463 | 5 |
+| Rhode Island | 10,132 | 10,125 | 7 | 1 |
+| South Carolina | 20,172 | 20,129 | 43 | 4 |
+| **TOTAL** | **214,274** | **176,098** | **38,176** | **41** |
+
+**Not yet organized (need PDF extraction):**
+- Montana: 184 CSV rows, 0 txt files
+- Vermont: 11,310 CSV rows, 0 txt files
+
+### Session 3 — PDF Extraction, Florida Re-org, D3 Fixes, Final Verification
+
+#### PDF Extraction Results
+
+| State | PDFs Found | Success | Empty | Errors | Time |
+|---|---|---|---|---|---|
+| Montana | 184 | 184 | 0 | 0 | 2.2s |
+| Pennsylvania | 58 | 57 | 1 | 0 | 3.3s |
+| Vermont | 11,306 | 11,266 | 40 | 0 | 364s |
+| Florida | 30,832 | 30,829 | 3 | 0 | 535s |
+
+#### Bug Fixes (Session 3)
+
+1. **Montana handler**: Was looking for txt at wrong path; changed to recursive index from `cfg.txt_root / "downloads"`.
+2. **Florida handler**: Updated to index txt from both old `download/pdf/` and new `downloads/` dirs.
+3. **`ensure_clean_dir()`**: Added WSL permission error fallback.
+4. **`year_from_value()`**: Returns `"unknown_year"` instead of `""` — empty strings caused path collapse (`Path / "" / folder` → 2-level instead of 3-level), making opinions invisible to verifier.
+5. **`year_from_value()` regex**: Fixed `(19|20)\d{2}` → `(?:19|20)\d{2}`.
+6. **`make_unique_case_folder()`**: Case-insensitive comparison for NTFS.
+7. **New Mexico handler**: Added `%m/%d/%y` format for 2-digit year dates (12,321 rows).
+8. **Vermont handler**: Added `%m/%d/%y` format.
+9. **New Hampshire handler**: Added `%d/%m/%y` and `%m/%d/%y` formats; fixed year fallback regex.
+10. **Florida handler (line 329)**: Added `unknown_year` guard.
+
+#### Re-Organization Improvements
+
+| State | Before | After | Change |
+|---|---|---|---|
+| Florida | 2,852 | 32,226 | +29,374 |
+| Montana | 0 | 184 | +184 |
+| Pennsylvania | 537 | 572 | +35 |
+| Vermont | 0 | 11,306 | +11,306 |
+| New Mexico | 19,443 | 30,810 | +11,367 |
+| New Hampshire | 5,164 | 5,206 | +42 |
+| Rhode Island | 10,063 | 10,125 | +62 |
+
+#### Final Verification (All 18 States — D3 = 0)
+
+| State | PDFs | Txts | Organized | D1 | D2 | D3 |
+|---|---|---|---|---|---|---|
+| Colorado | 1,956 | 2,019 | 1,755 | 1,953 | 264 | 0 |
+| Florida | 30,832 | 32,844 | 32,226 | 0 | 3 | 0 |
+| Georgia | 2,534 | 2,564 | 2,779 | 22 | 52 | 0 |
+| Iowa | 9,495 | 9,493 | 9,493 | 2 | 0 | 0 |
+| Louisiana | 5,012 | 8,807 | 4,875 | 0 | 3,941 | 0 |
+| Maine | 1,139 | 1,135 | 1,135 | 4 | 0 | 0 |
+| Maryland | 9,850 | 9,842 | 9,841 | 8 | 1 | 0 |
+| Massachusetts | 19,389 | 19,337 | 19,337 | 52 | 0 | 0 |
+| Montana | 184 | 184 | 184 | 0 | 0 | 0 |
+| Nevada | 5,066 | 5,022 | 5,022 | 44 | 0 | 0 |
+| New Hampshire | 5,240 | 5,216 | 5,206 | 24 | 60 | 0 |
+| New Jersey | 20,259 | 20,077 | 17,546 | 20,219 | 2,521 | 0 |
+| New Mexico | 33,204 | 30,819 | 30,810 | 33,204 | 9 | 0 |
+| North Carolina | 72,092 | 36,150 | 34,656 | 102 | 1,494 | 0 |
+| Pennsylvania | 58 | 540 | 572 | 0 | 92 | 0 |
+| Rhode Island | 9,146 | 9,139 | 10,125 | 7 | 0 | 0 |
+| South Carolina | 20,172 | 20,129 | 20,129 | 43 | 0 | 0 |
+| Vermont | 11,307 | 11,306 | 11,306 | 1 | 0 | 0 |
+| **TOTAL** | **256,935** | **224,823** | **216,947** | — | — | **0** |
+
+D3 = 0 across all states. Pipeline is fully consistent.
+
+#### Status: COMPLETE
+
+All 18 states organized, verified, and consistent.
+
+#### Checklist
+
+1. ~~Create handlers_existing.py~~ DONE
+2. ~~Create handlers_new.py~~ DONE
+3. ~~Create verify_pipeline.py~~ DONE
+4. ~~Test and run all batches~~ DONE
+5. ~~Run PDF-to-txt extraction for Montana, Vermont, Florida, Pennsylvania~~ DONE
+6. ~~Organize Montana, Vermont, Florida (re-run), Pennsylvania (re-run)~~ DONE
+7. ~~Run verification on all 18 states~~ DONE
+8. ~~Fix D3 gaps (NM, NH, RI, VT) — empty year path collapse bug~~ DONE
+9. ~~Re-verify all fixed states — D3 = 0 confirmed~~ DONE

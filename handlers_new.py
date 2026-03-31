@@ -158,7 +158,13 @@ def reorganize_new_hampshire(cfg: StateConfig) -> dict[str, int]:
             counts["rows_skipped_missing_text"] += 1
             continue
 
-        text_path = (cfg.txt_root / Path(pdf_local)).with_suffix(".txt")
+        # Handle absolute Windows paths: extract relative path from 'downloads/' onwards
+        pdf_local_normalized = pdf_local.replace("\\", "/")
+        if "downloads/" in pdf_local_normalized:
+            pdf_local_rel = "downloads/" + pdf_local_normalized.split("downloads/", 1)[1]
+        else:
+            pdf_local_rel = pdf_local_normalized
+        text_path = (cfg.txt_root / Path(pdf_local_rel)).with_suffix(".txt")
         if not text_path.exists():
             counts["rows_skipped_missing_text"] += 1
             continue
@@ -167,12 +173,12 @@ def reorganize_new_hampshire(cfg: StateConfig) -> dict[str, int]:
         court_folder, court_name = COURT_MAP.get(court_key, (slugify(court_key), court_key))
 
         date_raw = row.get("case_date", "").strip()
-        year = year_from_value(date_raw, ["%Y-%m-%d"])
-        if not year:
-            # Fallback: extract year from pdf_local_path
-            match = re.search(r"/(19|20\d{2})/", pdf_local)
+        year = year_from_value(date_raw, ["%Y-%m-%d", "%d/%m/%y", "%m/%d/%y"])
+        if year == "unknown_year":
+            # Fallback: extract year from pdf_local_path (use normalized path)
+            match = re.search(r"/(?:19|20)\d{2}/", pdf_local_normalized)
             if match:
-                year = match.group(1)
+                year = match.group(0).strip("/")
             else:
                 # Try 4-digit component from path parts
                 for part in Path(pdf_local).parts:
@@ -250,11 +256,20 @@ def reorganize_new_jersey(cfg: StateConfig) -> dict[str, int]:
     for row in rows:
         counts["rows_total"] += 1
 
-        # Try to find txt by pdf_full_path stem, then by case number
+        # NJ txt files are named {case_no}_{pdf_stem}.txt
+        # pdf_full_path is like: downloads\Supreme\2026\A-36-24\a_36_37_38_39_24.pdf
+        case_no = row.get("no", "").strip()
         pdf_full = row.get("pdf_full_path", "").strip()
         text_path = None
-        if pdf_full:
-            stem = Path(pdf_full).stem.lower()
+        if case_no and pdf_full:
+            pdf_stem = Path(pdf_full.replace("\\", "/")).stem
+            # Construct the expected txt stem: case_no_pdf_stem
+            expected_stem = f"{case_no}_{pdf_stem}".lower()
+            text_path = text_index.get(expected_stem)
+        
+        # Fallback: try just the pdf stem
+        if not text_path and pdf_full:
+            stem = Path(pdf_full.replace("\\", "/")).stem.lower()
             text_path = text_index.get(stem)
 
         if not text_path:
@@ -270,7 +285,7 @@ def reorganize_new_jersey(cfg: StateConfig) -> dict[str, int]:
         date_raw = row.get("date", "").strip()
         normalized_date = normalize_nj_date(date_raw)
         year = year_from_value(normalized_date, ["%Y-%m-%d", "%B %d, %Y", "%b %d, %Y"])
-        case_id = row.get("no", "").strip() or text_path.stem
+        case_id = case_no or text_path.stem
         case_folder = make_unique_case_folder(
             sanitize_case_component(case_id),
             date_raw,
@@ -320,7 +335,8 @@ def reorganize_new_mexico(cfg: StateConfig) -> dict[str, int]:
     csv_path = cfg.raw_root / "downloads" / "CSV" / "case.csv"
 
     # Build index: item_id → txt Path
-    # NM txt filenames typically contain the item_id
+    # NM txt filenames are like: 01-01-1852_369690_Bray v. United States.txt
+    # Extract item_id (the numeric part between underscores)
     text_index_sc: dict[str, Path] = {}
     text_index_ca: dict[str, Path] = {}
 
@@ -331,7 +347,14 @@ def reorganize_new_mexico(cfg: StateConfig) -> dict[str, int]:
         if not txt_dir.exists():
             continue
         for p in txt_dir.glob("*.txt"):
-            # item_id is typically in the filename
+            # Extract item_id from filename: date_itemid_title.txt
+            parts = p.stem.split("_")
+            if len(parts) >= 2:
+                # item_id is typically the second part (numeric)
+                item_id_candidate = parts[1]
+                if item_id_candidate.isdigit():
+                    idx[item_id_candidate] = p
+            # Also index by full stem as fallback
             idx[p.stem.lower()] = p
 
     # Also build a combined basename index for fallback
@@ -347,9 +370,14 @@ def reorganize_new_mexico(cfg: StateConfig) -> dict[str, int]:
     used_folders: dict[tuple[str, str], set[str]] = defaultdict(set)
 
     COURT_MAP = {
+        "supreme_court_of_new_mexico": ("supreme_court", "New Mexico Supreme Court"),
         "supreme_court": ("supreme_court", "New Mexico Supreme Court"),
+        "court_of_appeals_of_new_mexico": ("court_of_appeals", "New Mexico Court of Appeals"),
         "court_of_appeals": ("court_of_appeals", "New Mexico Court of Appeals"),
     }
+
+    # Track which court_raw values map to which index
+    SC_COURTS = {"supreme_court_of_new_mexico", "supreme_court"}
 
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
@@ -363,28 +391,32 @@ def reorganize_new_mexico(cfg: StateConfig) -> dict[str, int]:
             (slugify(court_raw) or "unknown_court", court_raw),
         )
 
-        # Try to find txt via pdf_local_path stem
-        pdf_local = row.get("pdf_local_path", "").strip()
+        # Try to find txt via item_id first (txt files indexed by item_id)
         text_path = None
-        if pdf_local:
-            stem = Path(pdf_local).stem.lower()
-            if court_raw == "supreme_court":
-                text_path = text_index_sc.get(stem)
+        if item_id:
+            if court_raw in SC_COURTS:
+                text_path = text_index_sc.get(item_id)
             else:
-                text_path = text_index_ca.get(stem)
-            if not text_path:
-                text_path = all_txt_index.get(stem)
-
-        # Fallback: try item_id directly
-        if not text_path and item_id:
-            text_path = all_txt_index.get(item_id.lower())
+                text_path = text_index_ca.get(item_id)
+        
+        # Fallback: try pdf_local_path stem (which is also item_id)
+        if not text_path:
+            pdf_local = row.get("pdf_local_path", "").strip()
+            if pdf_local:
+                stem = Path(pdf_local.replace("\\", "/")).stem.lower()
+                if court_raw in SC_COURTS:
+                    text_path = text_index_sc.get(stem)
+                else:
+                    text_path = text_index_ca.get(stem)
+                if not text_path:
+                    text_path = all_txt_index.get(stem)
 
         if not text_path:
             counts["rows_skipped_missing_text"] += 1
             continue
 
         date_raw = row.get("publication_date", "").strip()
-        year = year_from_value(date_raw, ["%m/%d/%Y", "%Y-%m-%d"])
+        year = year_from_value(date_raw, ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"])
         case_id = item_id or text_path.stem
         case_folder = make_unique_case_folder(
             sanitize_case_component(case_id),
@@ -427,14 +459,21 @@ def _nc_pdf_id_from_url(pdf_url: str) -> str:
     """Extract a unique identifier from a North Carolina pdf_url.
 
     The URL typically looks like:
-      https://.../<filename>.pdf?VersionId=<hex>
-    We use the filename stem + VersionId (if present) as the key.
+      https://appellate.nccourts.org/opinions/?c=2&pdf=45475
+    We extract the 'pdf' query parameter as the key.
     """
     if not pdf_url:
         return ""
     parsed = urlparse(pdf_url)
-    stem = Path(parsed.path).stem
     qs = parse_qs(parsed.query)
+    
+    # Try 'pdf' parameter first (most common)
+    pdf_id = qs.get("pdf", [""])[0]
+    if pdf_id:
+        return pdf_id.lower()
+    
+    # Fallback: try filename stem + VersionId
+    stem = Path(parsed.path).stem
     version = qs.get("VersionId", [""])[0]
     if version:
         return f"{stem}_{version}".lower()
@@ -453,14 +492,26 @@ def reorganize_north_carolina(cfg: StateConfig) -> dict[str, int]:
 
     csv_path = cfg.raw_root / "downloads" / "CSV" / "north_carolina_opinions_merged.csv"
 
-    # Build a text index from the single flat dir (all courts share it)
+    # Build text index by numeric pdf_id suffix from filenames like "Title_12345.txt"
+    # The pdf_id corresponds to the 'pdf' query param in the CSV's pdf_url
     txt_dir = cfg.txt_root / "download" / "appellate_court_opinions" / "file"
-    text_index = build_text_index_by_basename(txt_dir) if txt_dir.exists() else {}
+    text_index: dict[str, Path] = {}
+    if txt_dir.exists():
+        for p in txt_dir.glob("*.txt"):
+            # Extract numeric suffix: "Title Name_12345.txt" -> "12345"
+            parts = p.stem.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                text_index[parts[1]] = p
+            # Also index by full stem for fallback
+            text_index[p.stem.lower()] = p
 
     # Also check for business court txt in a separate location
-    biz_txt_dir = cfg.txt_root / "download" / "business_court" / "file"
+    biz_txt_dir = cfg.txt_root / "download" / "business_court_opinions" / "file"
     if biz_txt_dir.exists():
         for p in biz_txt_dir.glob("*.txt"):
+            parts = p.stem.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                text_index.setdefault(parts[1], p)
             text_index.setdefault(p.stem.lower(), p)
 
     counts: dict[str, int] = {
@@ -487,18 +538,18 @@ def reorganize_north_carolina(cfg: StateConfig) -> dict[str, int]:
         pdf_url = row.get("pdf_url", "").strip()
         zip_url = row.get("zip_url", "").strip()
 
-        # Try to match txt file by pdf_url stem
+        # Try to match txt file by pdf_id from 'pdf' query param
         text_path = None
         if pdf_url:
             parsed = urlparse(pdf_url)
-            stem = Path(parsed.path).stem.lower()
-            text_path = text_index.get(stem)
-
-        # Fallback: try zip_url stem (for cases distributed as zip)
-        if not text_path and zip_url:
-            parsed = urlparse(zip_url)
-            stem = Path(parsed.path).stem.lower()
-            text_path = text_index.get(stem)
+            qs = parse_qs(parsed.query)
+            pdf_id = qs.get("pdf", [""])[0]
+            if pdf_id:
+                text_path = text_index.get(pdf_id)
+            if not text_path:
+                # Fallback: try URL path stem
+                stem = Path(parsed.path).stem.lower()
+                text_path = text_index.get(stem)
 
         if not text_path:
             counts["rows_skipped_missing_text"] += 1
@@ -591,7 +642,8 @@ def reorganize_pennsylvania(cfg: StateConfig) -> dict[str, int]:
             counts["rows_skipped_missing_text"] += 1
             continue
 
-        stem = Path(pdf_file).stem.lower()
+        # Normalize backslashes for cross-platform path handling
+        stem = Path(pdf_file.replace("\\", "/")).stem.lower()
         text_path = text_index.get(stem)
         if not text_path:
             counts["rows_skipped_missing_text"] += 1
@@ -607,10 +659,11 @@ def reorganize_pennsylvania(cfg: StateConfig) -> dict[str, int]:
         year = year_from_value(date_raw, ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"])
 
         # Extract case key from the portion after '__' in pdf_file
-        if "__" in pdf_file:
-            case_id = Path(pdf_file).stem.split("__", 1)[1]
+        pdf_stem = Path(pdf_file.replace("\\", "/")).stem
+        if "__" in pdf_stem:
+            case_id = pdf_stem.split("__", 1)[1]
         else:
-            case_id = Path(pdf_file).stem
+            case_id = pdf_stem
         case_id = case_id.strip() or text_path.stem
 
         case_folder = make_unique_case_folder(
@@ -680,7 +733,13 @@ def reorganize_rhode_island(cfg: StateConfig) -> dict[str, int]:
             counts["rows_skipped_missing_text"] += 1
             continue
 
-        text_path = (cfg.txt_root / Path(pdf_local)).with_suffix(".txt")
+        # Handle absolute Windows paths: extract relative path from 'downloads/' onwards
+        pdf_local_normalized = pdf_local.replace("\\", "/")
+        if "downloads/" in pdf_local_normalized:
+            pdf_local_rel = "downloads/" + pdf_local_normalized.split("downloads/", 1)[1]
+        else:
+            pdf_local_rel = pdf_local_normalized
+        text_path = (cfg.txt_root / Path(pdf_local_rel)).with_suffix(".txt")
         if not text_path.exists():
             counts["rows_skipped_missing_text"] += 1
             continue
@@ -885,7 +944,7 @@ def reorganize_vermont(cfg: StateConfig) -> dict[str, int]:
         )
 
         date_raw = row.get("Date", "").strip()
-        year = year_from_value(date_raw, ["%m/%d/%Y", "%Y-%m-%d"])
+        year = year_from_value(date_raw, ["%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"])
         case_id = row.get("Case Number", "").strip() or text_path.stem
         case_folder = make_unique_case_folder(
             sanitize_case_component(case_id),

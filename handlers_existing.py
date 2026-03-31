@@ -128,8 +128,16 @@ def reorganize_florida(cfg: StateConfig) -> dict[str, int]:
     ensure_clean_dir(cfg.output_root)
 
     csv_root = cfg.raw_root / "downloads"
-    text_dir = cfg.txt_root / "download" / "pdf"
-    text_index = {p.stem.lower(): p for p in text_dir.glob("*.txt")} if text_dir.exists() else {}
+    # Index txt files from both the old flat directory and new extracted directory
+    text_index: dict[str, Path] = {}
+    # Old: txt_output/florida/download/pdf/*.txt (flat, from earlier extraction)
+    old_dir = cfg.txt_root / "download" / "pdf"
+    if old_dir.exists():
+        text_index.update({p.stem.lower(): p for p in old_dir.glob("*.txt")})
+    # New: txt_output/florida/downloads/<court>/<year>/<case>/*.txt (from pdf_to_txt.py)
+    new_dir = cfg.txt_root / "downloads"
+    if new_dir.exists():
+        text_index.update(build_text_index_by_basename(new_dir))
 
     counts: dict[str, int] = {
         "rows_total": 0,
@@ -306,7 +314,8 @@ def reorganize_iowa(cfg: StateConfig) -> dict[str, int]:
         for row in rows:
             counts["rows_total"] += 1
             # Iowa txt mirrors the pdf_local_path structure under txt_root/downloads/
-            pdf_local = row.get("pdf_local_path", "").replace("/", "\\")
+            # Normalize to forward slashes for cross-platform compatibility
+            pdf_local = row.get("pdf_local_path", "").replace("\\", "/")
             # pdf_local_path is like: downloads/supreme-court/2023/case/file.pdf
             # txt equivalent: txt_root/downloads/supreme-court/2023/case/file.txt
             text_path = (cfg.txt_root / Path(pdf_local)).with_suffix(".txt")
@@ -324,6 +333,8 @@ def reorganize_iowa(cfg: StateConfig) -> dict[str, int]:
                     if len(part) == 4 and part.isdigit():
                         year = part
                         break
+            if not year:
+                year = "unknown_year"
             case_id = row.get("case_no", "").strip()
             case_folder = make_unique_case_folder(
                 sanitize_case_component(case_id),
@@ -649,9 +660,9 @@ def reorganize_montana(cfg: StateConfig) -> dict[str, int]:
     ensure_clean_dir(cfg.output_root)
 
     csv_path = cfg.raw_root / "downloads" / "supreme_court" / "CSV" / "supreme_court_daily_orders.csv"
-    # Montana may have 0 txt files -- index whatever exists
-    txt_pdf_dir = cfg.txt_root / "downloads" / "PDF"
-    text_index = build_text_index_by_basename(txt_pdf_dir) if txt_pdf_dir.exists() else {}
+    # Montana txt files mirror the PDF directory structure under txt_root/downloads/
+    txt_dir = cfg.txt_root / "downloads"
+    text_index = build_text_index_by_basename(txt_dir) if txt_dir.exists() else {}
     court_folder = "supreme_court"
     counts: dict[str, int] = {
         "rows_total": 0,
